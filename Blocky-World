@@ -1,0 +1,451 @@
+<?xml version="1.0" encoding="utf-8"?>
+<roblox version="4">
+  <External>null</External>
+  <External>nil</External>
+  <Item class="Workspace" referent="RBX1">
+    <Properties>
+      <string name="Name">Workspace</string>
+    </Properties>
+  </Item>
+  <Item class="Lighting" referent="RBX2">
+    <Properties>
+      <string name="Name">Lighting</string>
+    </Properties>
+  </Item>
+  <Item class="ReplicatedStorage" referent="RBX3">
+    <Properties>
+      <string name="Name">ReplicatedStorage</string>
+    </Properties>
+    <Item class="ModuleScript" referent="RBX7">
+      <Properties>
+        <string name="Name">Catalog</string>
+        <bool name="Disabled">false</bool>
+        <ProtectedString name="Source">local Catalog = {}
+
+Catalog.Buildings = {
+    TinyHouse = { display = &quot;Casinha Pixel&quot;, price = 0, size = Vector3.new(8, 8, 8), color = Color3.fromRGB(246, 193, 74), kind = &quot;house&quot; },
+    BlueTower = { display = &quot;Torre Azul&quot;, price = 150, size = Vector3.new(6, 14, 6), color = Color3.fromRGB(62, 157, 255), kind = &quot;tower&quot; },
+    BlockBridge = { display = &quot;Ponte Bloco&quot;, price = 100, size = Vector3.new(12, 2, 5), color = Color3.fromRGB(96, 198, 255), kind = &quot;bridge&quot; },
+    PinkCastle = { display = &quot;Castelo Rosa&quot;, price = 350, size = Vector3.new(12, 12, 12), color = Color3.fromRGB(255, 105, 174), kind = &quot;castle&quot; },
+    TreePlanter = { display = &quot;Árvore de Praça&quot;, price = 75, size = Vector3.new(6, 10, 6), color = Color3.fromRGB(74, 200, 74), kind = &quot;tree&quot; },
+    Fence = { display = &quot;Cerca Colorida&quot;, price = 35, size = Vector3.new(8, 3, 1), color = Color3.fromRGB(255, 220, 95), kind = &quot;fence&quot; },
+}
+
+Catalog.Weapons = {
+    FoamSword = { display = &quot;Espada de Espuma&quot;, price = 0, damage = 12, range = 8, color = Color3.fromRGB(255, 117, 75), kind = &quot;melee&quot; },
+    PixelBlaster = { display = &quot;Blaster Pixel&quot;, price = 220, damage = 10, range = 70, color = Color3.fromRGB(82, 190, 255), kind = &quot;ranged&quot; },
+    StarWand = { display = &quot;Varinha Estelar&quot;, price = 140, damage = 8, range = 45, color = Color3.fromRGB(203, 116, 255), kind = &quot;ranged&quot; },
+}
+
+Catalog.DefaultOwned = { buildings = { &quot;TinyHouse&quot;, &quot;Fence&quot;, &quot;TreePlanter&quot; }, weapons = { &quot;FoamSword&quot; } }
+Catalog.Plot = { minX = -48, maxX = 48, minZ = -42, maxZ = 40, groundY = 0 }
+return Catalog
+</ProtectedString>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="ServerScriptService" referent="RBX4">
+    <Properties>
+      <string name="Name">ServerScriptService</string>
+    </Properties>
+    <Item class="Script" referent="RBX8">
+      <Properties>
+        <string name="Name">BlockyWorldServer</string>
+        <bool name="Disabled">false</bool>
+        <ProtectedString name="Source">-- Blocky World: lógica autoritativa do servidor. Compatível com avatares R6 e R15.
+local Players = game:GetService(&quot;Players&quot;)
+local ReplicatedStorage = game:GetService(&quot;ReplicatedStorage&quot;)
+local DataStoreService = game:GetService(&quot;DataStoreService&quot;)
+local Lighting = game:GetService(&quot;Lighting&quot;)
+local Debris = game:GetService(&quot;Debris&quot;)
+local Catalog = require(ReplicatedStorage:WaitForChild(&quot;Catalog&quot;))
+
+local STORE = DataStoreService:GetDataStore(&quot;BlockyWorld_PlayerData_v1&quot;)
+local remotes = ReplicatedStorage:FindFirstChild(&quot;BlockyRemotes&quot;) or Instance.new(&quot;Folder&quot;)
+remotes.Name = &quot;BlockyRemotes&quot;; remotes.Parent = ReplicatedStorage
+local function remote(class, name)
+    local r = remotes:FindFirstChild(name) or Instance.new(class); r.Name = name; r.Parent = remotes; return r
+end
+local GetState = remote(&quot;RemoteFunction&quot;, &quot;GetState&quot;)
+local StateChanged = remote(&quot;RemoteEvent&quot;, &quot;StateChanged&quot;)
+local BuyItem = remote(&quot;RemoteEvent&quot;, &quot;BuyItem&quot;)
+local EquipWeapon = remote(&quot;RemoteEvent&quot;, &quot;EquipWeapon&quot;)
+local PlaceBuild = remote(&quot;RemoteEvent&quot;, &quot;PlaceBuild&quot;)
+local RemoveBuild = remote(&quot;RemoteEvent&quot;, &quot;RemoveBuild&quot;)
+local Notify = remote(&quot;RemoteEvent&quot;, &quot;Notify&quot;)
+
+local playerData, placedFolder = {}, nil
+local lastAction = {}
+local COLORS = {
+    grass = Color3.fromRGB(64, 224, 68), darkgrass = Color3.fromRGB(44, 184, 63), pink = Color3.fromRGB(255, 94, 180),
+    blue = Color3.fromRGB(53, 165, 255), orange = Color3.fromRGB(255, 151, 47), white = Color3.fromRGB(250, 250, 244),
+    brown = Color3.fromRGB(126, 76, 42),
+}
+
+local function part(parent, name, size, cf, color, material)
+    local p = Instance.new(&quot;Part&quot;); p.Name = name; p.Size = size; p.CFrame = cf; p.Anchored = true
+    p.TopSurface = Enum.SurfaceType.Smooth; p.BottomSurface = Enum.SurfaceType.Smooth
+    p.Color = color; p.Material = material or Enum.Material.SmoothPlastic; p.Parent = parent; return p
+end
+local function sign(parent, text, cf, width, height, color)
+    local board = part(parent, &quot;VoxelSign&quot;, Vector3.new(width, height, 1), cf, color or COLORS.blue)
+    local gui = Instance.new(&quot;SurfaceGui&quot;); gui.Face = Enum.NormalId.Front; gui.SizingMode = Enum.SurfaceGuiSizingMode.PixelsPerStud; gui.PixelsPerStud = 45; gui.Parent = board
+    local label = Instance.new(&quot;TextLabel&quot;); label.Size = UDim2.fromScale(1,1); label.BackgroundTransparency = 1; label.Text = text; label.TextColor3 = Color3.new(1,1,1); label.TextStrokeTransparency = 0.35; label.Font = Enum.Font.GothamBlack; label.TextScaled = true; label.Parent = gui
+    return board
+end
+local function tree(parent, x, z, scale)
+    scale = scale or 1
+    part(parent, &quot;SquareTrunk&quot;, Vector3.new(2,5,2)*scale, CFrame.new(x,2.5*scale,z), COLORS.brown, Enum.Material.Wood)
+    part(parent, &quot;LeafCubeLower&quot;, Vector3.new(6,4,6)*scale, CFrame.new(x,6.5*scale,z), Color3.fromRGB(48,196,70))
+    part(parent, &quot;LeafCubeUpper&quot;, Vector3.new(4,4,4)*scale, CFrame.new(x,10*scale,z), Color3.fromRGB(83,225,77))
+end
+local function tent(parent, x, z, title, canopyColor)
+    local m = Instance.new(&quot;Model&quot;); m.Name = title .. &quot;_Booth&quot;; m.Parent = parent
+    part(m,&quot;Counter&quot;,Vector3.new(12,3,5),CFrame.new(x,1.5,z),Color3.fromRGB(227,228,232))
+    part(m,&quot;CounterTop&quot;,Vector3.new(12.5,.45,5.5),CFrame.new(x,3.2,z),Color3.fromRGB(255,255,255))
+    for _,dx in ipairs({-5,5}) do for _,dz in ipairs({-2,2}) do part(m,&quot;CanopyPost&quot;,Vector3.new(.5,5,.5),CFrame.new(x+dx,2.5,z+dz),Color3.fromRGB(245,245,245)) end end
+    for i=1,6 do
+        local stripe = part(m,&quot;StripedCanopy&quot;,Vector3.new(2,1,6),CFrame.new(x-5.5+(i-1)*2,5.3,z),i%2==0 and COLORS.white or canopyColor)
+    end
+    sign(m,title,CFrame.new(x,7.2,z-3.5),13,2.5,canopyColor)
+end
+
+local function buildMap()
+    if workspace:FindFirstChild(&quot;BlockyWorldMap&quot;) then return end
+    local map = Instance.new(&quot;Folder&quot;); map.Name = &quot;BlockyWorldMap&quot;; map.Parent = workspace
+    Lighting.ClockTime = 13.5; Lighting.Brightness = 2.2; Lighting.Ambient = Color3.fromRGB(150,178,205); Lighting.OutdoorAmbient = Color3.fromRGB(175,198,220)
+    Lighting.EnvironmentDiffuseScale = .7; Lighting.EnvironmentSpecularScale = .35
+    local sky = Lighting:FindFirstChildOfClass(&quot;Sky&quot;) or Instance.new(&quot;Sky&quot;); sky.Parent = Lighting
+    sky.SkyboxBk = &quot;rbxasset://sky/sky512_bk.tex&quot;; sky.SkyboxDn = &quot;rbxasset://sky/sky512_dn.tex&quot;; sky.SkyboxFt = &quot;rbxasset://sky/sky512_ft.tex&quot;; sky.SkyboxLf = &quot;rbxasset://sky/sky512_lf.tex&quot;; sky.SkyboxRt = &quot;rbxasset://sky/sky512_rt.tex&quot;; sky.SkyboxUp = &quot;rbxasset://sky/sky512_up.tex&quot;
+    part(map,&quot;MainGrassArena&quot;,Vector3.new(220,2,170),CFrame.new(0,-1,0),COLORS.grass,Enum.Material.Grass)
+    -- Anel de montanhas em blocos verdes e rosas, com simetria nos dois lados.
+    for side=-1,1,2 do
+        for i=1,8 do
+            local x=side*(55+i*7); local h=10+(i%4)*5
+            part(map,&quot;GreenVoxelHill&quot;,Vector3.new(14,h,18),CFrame.new(x,h/2-1,0),i%3==0 and COLORS.pink or Color3.fromRGB(65,193,70),Enum.Material.Grass)
+            part(map,&quot;PinkVoxelWall&quot;,Vector3.new(12,10+(i%3)*4,9),CFrame.new(side*(112),4+(i%3)*2, -65+i*18),i%2==0 and COLORS.pink or Color3.fromRGB(113,203,71),Enum.Material.SmoothPlastic)
+        end
+    end
+    -- Muralhas baixas e entrada principal ao fundo.
+    for x=-105,105,14 do part(map,&quot;BackWallBlock&quot;,Vector3.new(14,12,8),CFrame.new(x,5,-82),x%2==0 and Color3.fromRGB(70,194,72) or COLORS.pink) end
+    part(map,&quot;GatePillar&quot;,Vector3.new(10,23,10),CFrame.new(-16,10.5,-77),COLORS.pink)
+    part(map,&quot;GatePillar&quot;,Vector3.new(10,23,10),CFrame.new(16,10.5,-77),Color3.fromRGB(76,206,81))
+    part(map,&quot;GateHeader&quot;,Vector3.new(42,7,10),CFrame.new(0,22,-77),COLORS.blue)
+    sign(map,&quot;BLOCKY WORLD&quot;,CFrame.new(0,22,-71.5),25,4,COLORS.blue)
+    -- Áreas de lojas laterais, com plataformas/caminhos azuis e barracas listradas.
+    part(map,&quot;BlueWalkwayLeft&quot;,Vector3.new(30,1,100),CFrame.new(-78,-.35,5),COLORS.blue)
+    part(map,&quot;BlueWalkwayRight&quot;,Vector3.new(30,1,100),CFrame.new(78,-.35,5),COLORS.blue)
+    part(map,&quot;BuildingsPlaza&quot;,Vector3.new(36,1,32),CFrame.new(-78,-.2,-28),Color3.fromRGB(93,190,255))
+    part(map,&quot;WeaponsPlaza&quot;,Vector3.new(36,1,32),CFrame.new(78,-.2,-28),Color3.fromRGB(255,183,94))
+    tent(map,-78,-25,&quot;BUILDINGS&quot;,COLORS.blue); tent(map,78,-25,&quot;WEAPONS&quot;,COLORS.orange)
+    sign(map,&quot;CONSTRUA SEU MUNDO&quot;,CFrame.new(-78,10,-43),18,3,Color3.fromRGB(43,134,255))
+    sign(map,&quot;EQUIPAMENTOS&quot;,CFrame.new(78,10,-43),18,3,Color3.fromRGB(242,125,32))
+    -- Prédios decorativos e elementos simétricos no entorno.
+    for side=-1,1,2 do
+        local sx=side*44
+        part(map,&quot;DecorShop&quot;,Vector3.new(18,10,16),CFrame.new(sx,5,23),side&lt;0 and Color3.fromRGB(92,159,250) or Color3.fromRGB(251,145,67))
+        part(map,&quot;DecorRoof&quot;,Vector3.new(20,2,18),CFrame.new(sx,11,23),side&lt;0 and COLORS.blue or COLORS.orange)
+        sign(map,side&lt;0 and &quot;PIXEL HOME&quot; or &quot;GEAR BOX&quot;,CFrame.new(sx,8,14.4),14,2,side&lt;0 and COLORS.blue or COLORS.orange)
+        for _,z in ipairs({-64,-35,8,48,65}) do tree(map,side*(30+(z%3)*7),z,1+(math.abs(z)%2)*.15) end
+    end
+    -- Placas cuadriculadas decorativas, faróis e bancos.
+    for x=-30,30,15 do
+        part(map,&quot;BluePathTile&quot;,Vector3.new(10,.3,7),CFrame.new(x,.1,-53),Color3.fromRGB(72,177,255))
+        part(map,&quot;PixelLamp&quot;,Vector3.new(1,7,1),CFrame.new(x,3,54),Color3.fromRGB(45,83,130))
+        part(map,&quot;LampGlow&quot;,Vector3.new(3,1,3),CFrame.new(x,7,54),Color3.fromRGB(255,239,120),Enum.Material.Neon)
+    end
+    local spawn=Instance.new(&quot;SpawnLocation&quot;); spawn.Name=&quot;BlockySpawn&quot;; spawn.Size=Vector3.new(10,1,10); spawn.Position=Vector3.new(0,.5,55); spawn.Anchored=true; spawn.Neutral=true; spawn.Color=Color3.fromRGB(255,238,105); spawn.Material=Enum.Material.Neon; spawn.Parent=map
+    local plot=Instance.new(&quot;Folder&quot;); plot.Name=&quot;PlayerBuilds&quot;; plot.Parent=workspace; placedFolder=plot
+end
+
+local function defaultData()
+    return {coins=500,ownedBuildings=table.clone(Catalog.DefaultOwned.buildings),ownedWeapons=table.clone(Catalog.DefaultOwned.weapons),equipped=&quot;FoamSword&quot;,builds={}}
+end
+local function sanitize(raw)
+    local d=defaultData()
+    if type(raw)==&quot;table&quot; then
+        if type(raw.coins)==&quot;number&quot; then d.coins=math.clamp(math.floor(raw.coins),0,1000000) end
+        for _,key in ipairs({&quot;ownedBuildings&quot;,&quot;ownedWeapons&quot;}) do
+            if type(raw[key])==&quot;table&quot; then
+                local set={}; for _,name in ipairs(raw[key]) do if type(name)==&quot;string&quot; and ((key==&quot;ownedBuildings&quot; and Catalog.Buildings[name]) or (key==&quot;ownedWeapons&quot; and Catalog.Weapons[name])) then set[name]=true end end
+                for _,starter in ipairs(Catalog.DefaultOwned[key==&quot;ownedBuildings&quot; and &quot;buildings&quot; or &quot;weapons&quot;]) do set[starter]=true end
+                d[key]={}; for name in pairs(set) do table.insert(d[key],name) end
+            end
+        end
+        if Catalog.Weapons[raw.equipped] then d.equipped=raw.equipped end
+        if type(raw.builds)==&quot;table&quot; then for _,b in ipairs(raw.builds) do
+            if #d.builds&gt;=60 then break end
+            if type(b)==&quot;table&quot; and Catalog.Buildings[b.name] and type(b.x)==&quot;number&quot; and type(b.z)==&quot;number&quot; and type(b.rot)==&quot;number&quot; and math.abs(b.x)&lt;=48 and math.abs(b.z)&lt;=42 then
+                table.insert(d.builds,{name=b.name,x=math.clamp(b.x,-48,48),z=math.clamp(b.z,-42,40),rot=math.floor(b.rot/90+.5)%4*90})
+            end
+        end end
+    end
+    return d
+end
+local function snapshot(player)
+    local d=playerData[player]; if not d then return nil end
+    return {coins=d.coins,ownedBuildings=table.clone(d.ownedBuildings),ownedWeapons=table.clone(d.ownedWeapons),equipped=d.equipped}
+end
+local function notify(player,msg,kind) Notify:FireClient(player,msg,kind or &quot;info&quot;) end
+local function push(player)
+    local d=playerData[player]; if not d then return end
+    local stats=player:FindFirstChild(&quot;leaderstats&quot;); if stats and stats:FindFirstChild(&quot;Coins&quot;) then stats.Coins.Value=d.coins end
+    StateChanged:FireClient(player,snapshot(player))
+end
+local function save(player)
+    local d=playerData[player]; if not d then return end
+    local ok,err=pcall(function() STORE:SetAsync(&quot;u_&quot;..player.UserId,d) end)
+    if not ok then warn(&quot;BlockyWorld: falha ao salvar&quot;,player.UserId,err) end
+end
+
+local function addBlock(model,name,size,offset,color,material)
+    local p=Instance.new(&quot;Part&quot;); p.Name=name; p.Size=size; p.Anchored=true; p.CanCollide=true; p.TopSurface=Enum.SurfaceType.Smooth; p.BottomSurface=Enum.SurfaceType.Smooth; p.Color=color; p.Material=material or Enum.Material.SmoothPlastic; p.CFrame=model:GetPivot()*CFrame.new(offset); p.Parent=model; return p
+end
+local function makeBuild(name,position,rotation,ownerId)
+    local info=Catalog.Buildings[name]; if not info then return nil end
+    local model=Instance.new(&quot;Model&quot;); model.Name=name; model:SetAttribute(&quot;OwnerUserId&quot;,ownerId); model:SetAttribute(&quot;BuildingKey&quot;,name)
+    local pivot=CFrame.new(position)*CFrame.Angles(0,math.rad(rotation),0); model:PivotTo(pivot)
+    local c=info.color
+    if info.kind==&quot;house&quot; then
+        addBlock(model,&quot;HouseBody&quot;,Vector3.new(8,5,8),Vector3.new(0,2.5,0),c)
+        addBlock(model,&quot;Roof&quot;,Vector3.new(9,2,9),Vector3.new(0,6,0),Color3.fromRGB(216,80,88))
+        addBlock(model,&quot;Door&quot;,Vector3.new(1.5,3,.25),Vector3.new(0,1.5,-4.15),Color3.fromRGB(111,72,48))
+        addBlock(model,&quot;WindowLeft&quot;,Vector3.new(1.5,1.5,.3),Vector3.new(-2,3,-4.16),Color3.fromRGB(106,218,255),Enum.Material.Glass)
+        addBlock(model,&quot;WindowRight&quot;,Vector3.new(1.5,1.5,.3),Vector3.new(2,3,-4.16),Color3.fromRGB(106,218,255),Enum.Material.Glass)
+    elseif info.kind==&quot;tower&quot; then
+        addBlock(model,&quot;TowerBase&quot;,Vector3.new(6,9,6),Vector3.new(0,4.5,0),c)
+        addBlock(model,&quot;TowerCrown&quot;,Vector3.new(8,3,8),Vector3.new(0,10.5,0),Color3.fromRGB(150,218,255))
+        addBlock(model,&quot;TowerFlag&quot;,Vector3.new(.5,4,.5),Vector3.new(0,14,0),Color3.fromRGB(255,238,91))
+    elseif info.kind==&quot;bridge&quot; then
+        addBlock(model,&quot;BridgeDeck&quot;,Vector3.new(12,1.5,5),Vector3.new(0,.75,0),c)
+        for x=-5,5,2 do addBlock(model,&quot;BridgeTile&quot;,Vector3.new(.2,1.7,5),Vector3.new(x,1.6,0),Color3.fromRGB(185,236,255)) end
+    elseif info.kind==&quot;castle&quot; then
+        addBlock(model,&quot;CastleHall&quot;,Vector3.new(8,8,8),Vector3.new(0,4,0),c)
+        for _,x in ipairs({-5,5}) do for _,z in ipairs({-5,5}) do addBlock(model,&quot;Turret&quot;,Vector3.new(3,12,3),Vector3.new(x,6,z),Color3.fromRGB(237,137,207)) end end
+        addBlock(model,&quot;CastleDoor&quot;,Vector3.new(2,4,.3),Vector3.new(0,2,-4.2),Color3.fromRGB(121,74,143))
+    elseif info.kind==&quot;tree&quot; then
+        addBlock(model,&quot;Trunk&quot;,Vector3.new(2,5,2),Vector3.new(0,2.5,0),COLORS.brown,Enum.Material.Wood)
+        addBlock(model,&quot;LeavesLower&quot;,Vector3.new(6,4,6),Vector3.new(0,6.5,0),Color3.fromRGB(53,201,68))
+        addBlock(model,&quot;LeavesTop&quot;,Vector3.new(4,4,4),Vector3.new(0,10,0),Color3.fromRGB(96,230,75))
+    elseif info.kind==&quot;fence&quot; then
+        addBlock(model,&quot;FenceRail&quot;,Vector3.new(8,.6,.7),Vector3.new(0,2.3,0),c)
+        addBlock(model,&quot;FenceRail&quot;,Vector3.new(8,.6,.7),Vector3.new(0,.8,0),Color3.fromRGB(255,245,188))
+        for x=-3,3,2 do addBlock(model,&quot;FencePost&quot;,Vector3.new(.7,3,.9),Vector3.new(x,1.5,0),Color3.fromRGB(245,160,79)) end
+    end
+    model.Parent=placedFolder; return model
+end
+local function restoreBuilds(player)
+    local d=playerData[player]; if not d then return end
+    for _,b in ipairs(d.builds) do makeBuild(b.name,Vector3.new(b.x,0,b.z),b.rot,player.UserId) end
+end
+local function owned(list,name) return table.find(list,name)~=nil end
+local function throttle(player,kind,interval)
+    local now=os.clock(); lastAction[player]=lastAction[player] or {}
+    if now-(lastAction[player][kind] or 0)&lt;interval then return false end
+    lastAction[player][kind]=now; return true
+end
+local function finiteNumber(n)
+    return type(n)==&quot;number&quot; and n==n and n&gt;-math.huge and n&lt;math.huge
+end
+
+local function createWeaponTool(player,key)
+    local data=Catalog.Weapons[key]; if not data then return end
+    local backpack=player:FindFirstChildOfClass(&quot;Backpack&quot;); if not backpack then return end
+    for _,container in ipairs({backpack,player.Character}) do if container then for _,obj in ipairs(container:GetChildren()) do if obj:IsA(&quot;Tool&quot;) and obj:GetAttribute(&quot;BlockyWeapon&quot;) then obj:Destroy() end end end end
+    local tool=Instance.new(&quot;Tool&quot;); tool.Name=data.display; tool.RequiresHandle=true; tool.CanBeDropped=false; tool:SetAttribute(&quot;BlockyWeapon&quot;,true)
+    local handle=Instance.new(&quot;Part&quot;); handle.Name=&quot;Handle&quot;; handle.Size=key==&quot;FoamSword&quot; and Vector3.new(.65,4,.8) or Vector3.new(1,1,2.4); handle.Color=data.color; handle.Material=Enum.Material.Neon; handle.Anchored=false; handle.CanCollide=false; handle.Massless=true; handle.Parent=tool
+    tool:SetAttribute(&quot;WeaponKey&quot;,key)
+    local busy=false
+    tool.Activated:Connect(function()
+        if busy or tool.Parent~=player.Character then return end
+        busy=true; task.delay(.55,function() busy=false end)
+        local char=player.Character; local hum=char and char:FindFirstChildOfClass(&quot;Humanoid&quot;); local root=char and char:FindFirstChild(&quot;HumanoidRootPart&quot;)
+        if not hum or hum.Health&lt;=0 or not root then return end
+        local weapon=Catalog.Weapons[key]; if not weapon then return end
+        local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; params.FilterDescendantsInstances={char}
+        local result=workspace:Raycast(root.Position+Vector3.new(0,1,0),root.CFrame.LookVector*weapon.range,params)
+        if result then
+            local target=result.Instance:FindFirstAncestorOfClass(&quot;Model&quot;); local targetHumanoid=target and target:FindFirstChildOfClass(&quot;Humanoid&quot;)
+            if targetHumanoid and target~=char and targetHumanoid.Health&gt;0 then targetHumanoid:TakeDamage(weapon.damage) end
+        end
+    end)
+    tool.Parent=backpack
+end
+
+buildMap()
+GetState.OnServerInvoke=function(player) return snapshot(player) end
+BuyItem.OnServerEvent:Connect(function(player,category,key)
+    if not throttle(player,&quot;buy&quot;,.25) then return end
+    local d=playerData[player]; if not d then return end
+    local catalog,list
+    if category==&quot;building&quot; then catalog=Catalog.Buildings; list=d.ownedBuildings elseif category==&quot;weapon&quot; then catalog=Catalog.Weapons; list=d.ownedWeapons else return end
+    local item=catalog[key]; if not item then return end
+    if owned(list,key) then notify(player,&quot;Você já possui &quot;..item.display..&quot;.&quot;,&quot;info&quot;); return end
+    if d.coins&lt;item.price then notify(player,&quot;Moedas insuficientes.&quot;,&quot;error&quot;); return end
+    d.coins-=item.price; table.insert(list,key); push(player); save(player); notify(player,item.display..&quot; comprado!&quot;,&quot;success&quot;)
+end)
+EquipWeapon.OnServerEvent:Connect(function(player,key)
+    local d=playerData[player]; if not d or not throttle(player,&quot;equip&quot;,.3) or not Catalog.Weapons[key] or not owned(d.ownedWeapons,key) then return end
+    d.equipped=key; createWeaponTool(player,key); push(player); save(player); notify(player,&quot;Equipado: &quot;..Catalog.Weapons[key].display,&quot;success&quot;)
+end)
+PlaceBuild.OnServerEvent:Connect(function(player,key,pos,rotation)
+    local d=playerData[player]; if not d or not throttle(player,&quot;place&quot;,.2) then return end
+    local item=Catalog.Buildings[key]; if not item or not owned(d.ownedBuildings,key) or typeof(pos)~=&quot;Vector3&quot; or not finiteNumber(rotation) or math.abs(rotation)&gt;100000 then return end
+    if not finiteNumber(pos.X) or not finiteNumber(pos.Y) or not finiteNumber(pos.Z) then return end
+    if #d.builds&gt;=60 then notify(player,&quot;Limite de 60 construções atingido.&quot;,&quot;error&quot;); return end
+    local x,z=pos.X,pos.Z; if x&lt;Catalog.Plot.minX or x&gt;Catalog.Plot.maxX or z&lt;Catalog.Plot.minZ or z&gt;Catalog.Plot.maxZ then notify(player,&quot;Construa dentro do terreno central.&quot;,&quot;error&quot;); return end
+    local char=player.Character; local root=char and char:FindFirstChild(&quot;HumanoidRootPart&quot;); if not root or (root.Position-Vector3.new(x,0,z)).Magnitude&gt;180 then return end
+    local rot=(math.floor(rotation/90+.5)%4)*90; local snappedX=math.floor(x/2+.5)*2; local snappedZ=math.floor(z/2+.5)*2
+    local model=makeBuild(key,Vector3.new(snappedX,0,snappedZ),rot,player.UserId); if not model then return end
+    table.insert(d.builds,{name=key,x=snappedX,z=snappedZ,rot=rot}); save(player); notify(player,item.display..&quot; posicionada!&quot;,&quot;success&quot;)
+end)
+RemoveBuild.OnServerEvent:Connect(function(player,model)
+    local d=playerData[player]; if not d or not throttle(player,&quot;remove&quot;,.2) or typeof(model)~=&quot;Instance&quot; or not model:IsA(&quot;Model&quot;) or not model:IsDescendantOf(placedFolder) or model:GetAttribute(&quot;OwnerUserId&quot;)~=player.UserId then return end
+    local pivot=model:GetPivot().Position; local char=player.Character; local root=char and char:FindFirstChild(&quot;HumanoidRootPart&quot;)
+    if not root or (root.Position-pivot).Magnitude&gt;120 then return end
+    local name=model:GetAttribute(&quot;BuildingKey&quot;); model:Destroy()
+    for i=#d.builds,1,-1 do local b=d.builds[i]; if b.name==name and math.abs(b.x-pivot.X)&lt;1 and math.abs(b.z-pivot.Z)&lt;1 then table.remove(d.builds,i); break end end
+    save(player); notify(player,&quot;Construção removida.&quot;,&quot;success&quot;)
+end)
+
+Players.PlayerAdded:Connect(function(player)
+    local raw; local ok,result=pcall(function() return STORE:GetAsync(&quot;u_&quot;..player.UserId) end); if ok then raw=result else warn(&quot;BlockyWorld: carregamento sem DataStore, usando padrão&quot;,result) end
+    local d=sanitize(raw); playerData[player]=d
+    local stats=Instance.new(&quot;Folder&quot;); stats.Name=&quot;leaderstats&quot;; stats.Parent=player
+    local coins=Instance.new(&quot;IntValue&quot;); coins.Name=&quot;Coins&quot;; coins.Value=d.coins; coins.Parent=stats
+    task.defer(function() if player.Parent then restoreBuilds(player); createWeaponTool(player,d.equipped); push(player) end end)
+    player.CharacterAdded:Connect(function() task.wait(1); if playerData[player] then createWeaponTool(player,playerData[player].equipped) end end)
+end)
+Players.PlayerRemoving:Connect(function(player) save(player); playerData[player]=nil; lastAction[player]=nil end)
+game:BindToClose(function() for _,player in ipairs(Players:GetPlayers()) do save(player) end; task.wait(2) end)
+</ProtectedString>
+      </Properties>
+    </Item>
+  </Item>
+  <Item class="StarterPlayer" referent="RBX5">
+    <Properties>
+      <string name="Name">StarterPlayer</string>
+    </Properties>
+    <Item class="StarterPlayerScripts" referent="RBX6">
+      <Properties>
+        <string name="Name">StarterPlayerScripts</string>
+      </Properties>
+      <Item class="LocalScript" referent="RBX9">
+        <Properties>
+          <string name="Name">BlockyWorldClient</string>
+          <bool name="Disabled">false</bool>
+          <ProtectedString name="Source">-- Interface responsiva Blocky World (mouse, toque e teclado).
+local Players=game:GetService(&quot;Players&quot;); local ReplicatedStorage=game:GetService(&quot;ReplicatedStorage&quot;); local UserInputService=game:GetService(&quot;UserInputService&quot;); local RunService=game:GetService(&quot;RunService&quot;)
+local player=Players.LocalPlayer; local mouse=player:GetMouse(); local Catalog=require(ReplicatedStorage:WaitForChild(&quot;Catalog&quot;)); local remotes=ReplicatedStorage:WaitForChild(&quot;BlockyRemotes&quot;)
+local GetState=remotes:WaitForChild(&quot;GetState&quot;); local StateChanged=remotes:WaitForChild(&quot;StateChanged&quot;); local BuyItem=remotes:WaitForChild(&quot;BuyItem&quot;); local EquipWeapon=remotes:WaitForChild(&quot;EquipWeapon&quot;); local PlaceBuild=remotes:WaitForChild(&quot;PlaceBuild&quot;); local RemoveBuild=remotes:WaitForChild(&quot;RemoveBuild&quot;); local Notify=remotes:WaitForChild(&quot;Notify&quot;)
+local state={coins=0,ownedBuildings={},ownedWeapons={},equipped=&quot;FoamSword&quot;}; local currentTab=&quot;home&quot;; local selectedBuild=nil; local rotation=0; local removeMode=false; local ghost=nil; local uiScale
+
+local gui=Instance.new(&quot;ScreenGui&quot;); gui.Name=&quot;BlockyWorldUI&quot;; gui.ResetOnSpawn=false; gui.IgnoreGuiInset=false; gui.DisplayOrder=20; gui.Parent=player:WaitForChild(&quot;PlayerGui&quot;)
+local function corner(obj,r) local c=Instance.new(&quot;UICorner&quot;); c.CornerRadius=UDim.new(0,r or 12); c.Parent=obj end
+local function stroke(obj,color,thick) local s=Instance.new(&quot;UIStroke&quot;); s.Color=color or Color3.fromRGB(255,255,255); s.Thickness=thick or 2; s.Parent=obj end
+local function label(parent,text,size,pos,font,color)
+    local t=Instance.new(&quot;TextLabel&quot;); t.BackgroundTransparency=1; t.Text=text; t.Size=size; t.Position=pos; t.Font=font or Enum.Font.GothamBold; t.TextColor3=color or Color3.new(1,1,1); t.TextScaled=true; t.TextWrapped=true; t.Parent=parent; return t
+end
+local function button(parent,text,size,pos,color)
+    local b=Instance.new(&quot;TextButton&quot;); b.Text=text; b.Size=size; b.Position=pos; b.BackgroundColor3=color or Color3.fromRGB(61,157,255); b.TextColor3=Color3.new(1,1,1); b.TextScaled=true; b.TextWrapped=true; b.Font=Enum.Font.GothamBlack; b.AutoButtonColor=true; b.Parent=parent; corner(b,12); stroke(b,Color3.fromRGB(255,255,255),2); return b
+end
+local top=Instance.new(&quot;Frame&quot;); top.Size=UDim2.new(1,-24,0,66); top.Position=UDim2.new(0,12,0,10); top.BackgroundColor3=Color3.fromRGB(29,55,86); top.BackgroundTransparency=.08; top.Parent=gui; corner(top,16); stroke(top,Color3.fromRGB(119,205,255),2)
+label(top,&quot;BLOCKY WORLD&quot;,UDim2.new(.36,0,1,0),UDim2.new(.02,0,0,0),Enum.Font.GothamBlack,Color3.fromRGB(255,231,94))
+local money=label(top,&quot;🪙 500&quot;,UDim2.new(.2,0,1,0),UDim2.new(.39,0,0,0),Enum.Font.GothamBlack,Color3.fromRGB(255,224,83))
+local menuBtn=button(top,&quot;☰&quot;,UDim2.new(0,54,0,48),UDim2.new(1,-62,0,9),Color3.fromRGB(104,122,151))
+local nav=Instance.new(&quot;Frame&quot;); nav.Size=UDim2.new(0,158,0,235); nav.Position=UDim2.new(0,12,0,88); nav.BackgroundTransparency=1; nav.Parent=gui
+local buildingsBtn=button(nav,&quot;BUILDINGS&quot;,UDim2.new(1,0,0,50),UDim2.new(),Color3.fromRGB(50,149,255))
+local weaponsBtn=button(nav,&quot;WEAPONS&quot;,UDim2.new(1,0,0,50),UDim2.new(0,0,0,58),Color3.fromRGB(255,143,56))
+local inventoryBtn=button(nav,&quot;INVENTORY&quot;,UDim2.new(1,0,0,50),UDim2.new(0,0,0,116),Color3.fromRGB(119,105,220))
+local settingsBtn=button(nav,&quot;SETTINGS&quot;,UDim2.new(1,0,0,50),UDim2.new(0,0,0,174),Color3.fromRGB(81,174,129))
+local panel=Instance.new(&quot;Frame&quot;); panel.Size=UDim2.new(0,360,0,390); panel.Position=UDim2.new(1,-374,0,88); panel.BackgroundColor3=Color3.fromRGB(30,51,77); panel.BackgroundTransparency=.04; panel.Visible=false; panel.Parent=gui; corner(panel,18); stroke(panel,Color3.fromRGB(120,204,255),2)
+local panelTitle=label(panel,&quot;LOJA&quot;,UDim2.new(1,-58,0,48),UDim2.new(0,12,0,6),Enum.Font.GothamBlack,Color3.fromRGB(255,232,100))
+local close=button(panel,&quot;X&quot;,UDim2.new(0,40,0,38),UDim2.new(1,-48,0,8),Color3.fromRGB(230,83,92))
+local list=Instance.new(&quot;ScrollingFrame&quot;); list.Size=UDim2.new(1,-20,1,-66); list.Position=UDim2.new(0,10,0,56); list.BackgroundTransparency=1; list.BorderSizePixel=0; list.ScrollBarThickness=8; list.CanvasSize=UDim2.new(); list.AutomaticCanvasSize=Enum.AutomaticSize.Y; list.Parent=panel
+local layout=Instance.new(&quot;UIListLayout&quot;); layout.Padding=UDim.new(0,8); layout.SortOrder=Enum.SortOrder.LayoutOrder; layout.Parent=list
+local toast=label(gui,&quot;&quot;,UDim2.new(.56,0,0,46),UDim2.new(.22,0,0,84),Enum.Font.GothamBlack,Color3.new(1,1,1)); toast.BackgroundColor3=Color3.fromRGB(41,61,87); toast.BackgroundTransparency=.08; toast.Visible=false; corner(toast,13)
+local modeLabel=label(gui,&quot;&quot;,UDim2.new(.45,0,0,42),UDim2.new(.275,0,1,-58),Enum.Font.GothamBlack,Color3.fromRGB(255,255,255)); modeLabel.BackgroundColor3=Color3.fromRGB(30,51,77); modeLabel.Visible=false; corner(modeLabel,12)
+local action=button(gui,&quot;&quot;,UDim2.new(0,150,0,54),UDim2.new(1,-164,1,-74),Color3.fromRGB(59,182,113)); action.Visible=false
+local rotateBtn=button(gui,&quot;GIRAR&quot;,UDim2.new(0,100,0,48),UDim2.new(1,-270,1,-71),Color3.fromRGB(127,113,227)); rotateBtn.Visible=false
+local removeBtn=button(gui,&quot;REMOVER&quot;,UDim2.new(0,130,0,48),UDim2.new(0,12,1,-70),Color3.fromRGB(223,89,93))
+local function refreshMoney() money.Text=&quot;🪙 &quot;..tostring(state.coins or 0) end
+local function toastMsg(msg,kind) toast.Text=msg; toast.BackgroundColor3=kind==&quot;error&quot; and Color3.fromRGB(180,59,69) or (kind==&quot;success&quot; and Color3.fromRGB(48,135,93) or Color3.fromRGB(41,61,87)); toast.Visible=true; task.delay(2.5,function() toast.Visible=false end) end
+Notify.OnClientEvent:Connect(toastMsg)
+local function clearList() for _,o in ipairs(list:GetChildren()) do if o:IsA(&quot;Frame&quot;) then o:Destroy() end end end
+local function isOwned(category,key) return table.find(category==&quot;building&quot; and state.ownedBuildings or state.ownedWeapons,key)~=nil end
+local function refreshPanel()
+    clearList(); local entries={}; local category=currentTab==&quot;weapons&quot; and &quot;weapon&quot; or &quot;building&quot;; local catalog=category==&quot;weapon&quot; and Catalog.Weapons or Catalog.Buildings
+    if currentTab==&quot;settings&quot; then
+        panelTitle.Text=&quot;CONFIGURAÇÕES&quot;
+        local row=Instance.new(&quot;Frame&quot;); row.Size=UDim2.new(1,-4,0,86); row.BackgroundColor3=Color3.fromRGB(49,72,101); row.Parent=list; corner(row,12)
+        label(row,&quot;Gráficos&quot;,UDim2.new(.55,0,1,0),UDim2.new(.04,0,0,0),nil)
+        local low=button(row,&quot;ECONÔMICO&quot;,UDim2.new(.36,0,.68,0),UDim2.new(.6,0,.16,0),Color3.fromRGB(57,151,104)); low.Activated:Connect(function() game:GetService(&quot;Lighting&quot;).GlobalShadows=false; game:GetService(&quot;Lighting&quot;).EnvironmentSpecularScale=0; toastMsg(&quot;Iluminação econômica ativada neste cliente.&quot;,&quot;success&quot;) end)
+        return
+    end
+    panelTitle.Text=currentTab==&quot;weapons&quot; and &quot;LOJA DE EQUIPAMENTOS&quot; or (currentTab==&quot;inventory&quot; and &quot;INVENTÁRIO&quot; or &quot;LOJA BUILDINGS&quot;)
+    if currentTab==&quot;inventory&quot; then
+        for key,item in pairs(Catalog.Buildings) do if isOwned(&quot;building&quot;,key) then table.insert(entries,{key=key,item=item,cat=&quot;building&quot;}) end end
+        for key,item in pairs(Catalog.Weapons) do if isOwned(&quot;weapon&quot;,key) then table.insert(entries,{key=key,item=item,cat=&quot;weapon&quot;}) end end
+    else for key,item in pairs(catalog) do table.insert(entries,{key=key,item=item,cat=category}) end end
+    table.sort(entries,function(a,b) return a.item.price&lt;b.item.price end)
+    for _,entry in ipairs(entries) do
+        local row=Instance.new(&quot;Frame&quot;); row.Size=UDim2.new(1,-4,0,76); row.BackgroundColor3=Color3.fromRGB(49,72,101); row.Parent=list; corner(row,12)
+        local ownedItem=isOwned(entry.cat,entry.key)
+        local swatch=Instance.new(&quot;Frame&quot;); swatch.Size=UDim2.new(0,14,0,54); swatch.Position=UDim2.new(0,7,.5,-27); swatch.BackgroundColor3=entry.item.color; swatch.Parent=row; corner(swatch,6)
+        label(row,entry.item.display..&quot;\n&quot;..(ownedItem and &quot;Possuído&quot; or (&quot;🪙 &quot;..entry.item.price)),UDim2.new(.51,0,1,0),UDim2.new(0,28,0,0),Enum.Font.GothamBold,Color3.new(1,1,1))
+        local actionText
+        if entry.cat==&quot;weapon&quot; then actionText=ownedItem and (state.equipped==entry.key and &quot;EQUIPADO&quot; or &quot;EQUIPAR&quot;) or &quot;COMPRAR&quot; else actionText=ownedItem and (currentTab==&quot;inventory&quot; and &quot;SELECIONAR&quot; or &quot;ADQUIRIDO&quot;) or &quot;COMPRAR&quot; end
+        local act=button(row,actionText,UDim2.new(.36,0,.7,0),UDim2.new(.62,0,.15,0),ownedItem and Color3.fromRGB(64,174,117) or Color3.fromRGB(240,159,51))
+        act.Activated:Connect(function()
+            if not ownedItem then BuyItem:FireServer(entry.cat,entry.key)
+            elseif entry.cat==&quot;weapon&quot; then EquipWeapon:FireServer(entry.key); state.equipped=entry.key; refreshPanel()
+            elseif entry.cat==&quot;building&quot; then selectedBuild=entry.key; currentTab=&quot;home&quot;; panel.Visible=false; removeMode=false; updateMode() end
+        end)
+    end
+end
+function updateMode()
+    local building=selectedBuild~=nil; action.Visible=building; rotateBtn.Visible=building; modeLabel.Visible=building or removeMode
+    removeBtn.Text=removeMode and &quot;CANCELAR REMOÇÃO&quot; or &quot;REMOVER&quot;
+    if building then modeLabel.Text=&quot;Posicionando: &quot;..Catalog.Buildings[selectedBuild].display..&quot; | toque/clique para colocar&quot; elseif removeMode then modeLabel.Text=&quot;Toque/clique numa construção sua para remover&quot; end
+    if ghost then ghost:Destroy(); ghost=nil end
+    if building then ghost=Instance.new(&quot;Part&quot;); ghost.Name=&quot;BuildPreview&quot;; ghost.Size=Catalog.Buildings[selectedBuild].size; ghost.Anchored=true; ghost.CanCollide=false; ghost.Transparency=.55; ghost.Material=Enum.Material.ForceField; ghost.Color=Catalog.Buildings[selectedBuild].color; ghost.Parent=workspace end
+    action.Text=building and &quot;COLOCAR&quot; or &quot;&quot;; action.BackgroundColor3=removeMode and Color3.fromRGB(223,89,93) or Color3.fromRGB(59,182,113)
+end
+local function setTab(tab) currentTab=tab; panel.Visible=tab~=&quot;home&quot;; if panel.Visible then refreshPanel() end end
+buildingsBtn.Activated:Connect(function() setTab(&quot;buildings&quot;) end); weaponsBtn.Activated:Connect(function() setTab(&quot;weapons&quot;) end); inventoryBtn.Activated:Connect(function() setTab(&quot;inventory&quot;) end); settingsBtn.Activated:Connect(function() setTab(&quot;settings&quot;) end); menuBtn.Activated:Connect(function() nav.Visible=not nav.Visible end); close.Activated:Connect(function() panel.Visible=false end)
+removeBtn.Activated:Connect(function() removeMode=not removeMode; if removeMode then selectedBuild=nil end; updateMode() end)
+rotateBtn.Activated:Connect(function() rotation=(rotation+90)%360 end)
+local function rayPosition()
+    local camera=workspace.CurrentCamera; if not camera then return nil end
+    local ray=camera:ScreenPointToRay(mouse.X,mouse.Y); local params=RaycastParams.new(); params.FilterType=Enum.RaycastFilterType.Exclude; local ignore={player.Character}; if ghost then table.insert(ignore,ghost) end; params.FilterDescendantsInstances=ignore
+    local result=workspace:Raycast(ray.Origin,ray.Direction*500,params); if result then return result.Position,result.Instance end
+end
+local function placeAtCursor()
+    if selectedBuild then local pos=rayPosition(); if pos then PlaceBuild:FireServer(selectedBuild,Vector3.new(pos.X,0,pos.Z),rotation) end
+    elseif removeMode then local _,hit=rayPosition(); if hit then local model=hit:FindFirstAncestorOfClass(&quot;Model&quot;); if model and model:GetAttribute(&quot;OwnerUserId&quot;)==player.UserId then RemoveBuild:FireServer(model) end end end
+end
+action.Activated:Connect(placeAtCursor)
+UserInputService.InputBegan:Connect(function(input,processed)
+    if processed then return end
+    if input.KeyCode==Enum.KeyCode.R and selectedBuild then rotation=(rotation+90)%360
+    elseif input.KeyCode==Enum.KeyCode.Escape then selectedBuild=nil; removeMode=false; updateMode()
+    elseif input.UserInputType==Enum.UserInputType.MouseButton1 and (selectedBuild or removeMode) then placeAtCursor() end
+end)
+RunService.RenderStepped:Connect(function()
+    if ghost then local pos=rayPosition(); if pos then local x=math.floor(pos.X/2+.5)*2; local z=math.floor(pos.Z/2+.5)*2; ghost.CFrame=CFrame.new(x,Catalog.Buildings[selectedBuild].size.Y/2,z)*CFrame.Angles(0,math.rad(rotation),0); local within=math.abs(x)&lt;=48 and z&gt;=-42 and z&lt;=40; ghost.Color=within and Catalog.Buildings[selectedBuild].color or Color3.fromRGB(255,70,70) end end
+end)
+StateChanged.OnClientEvent:Connect(function(newState) if type(newState)==&quot;table&quot; then state=newState; refreshMoney(); if panel.Visible then refreshPanel() end end end)
+task.spawn(function() local ok,result=pcall(function() return GetState:InvokeServer() end); if ok and result then state=result; refreshMoney() end end)
+-- Layout compacto automaticamente em telefones.
+local function adapt()
+    local cam=workspace.CurrentCamera; if not cam then return end; local width=cam.ViewportSize.X
+    if width&lt;650 then nav.Size=UDim2.new(0,108,0,194); for i,b in ipairs({buildingsBtn,weaponsBtn,inventoryBtn,settingsBtn}) do b.Size=UDim2.new(1,0,0,43); b.Position=UDim2.new(0,0,0,(i-1)*49); b.TextSize=12 end; panel.Size=UDim2.new(.66,0,.52,0); panel.Position=UDim2.new(1,-8,0,84); panel.AnchorPoint=Vector2.new(1,0); top.Size=UDim2.new(1,-16,0,56); top.Position=UDim2.new(0,8,0,8); removeBtn.Size=UDim2.new(0,110,0,46); removeBtn.Position=UDim2.new(0,8,1,-58); action.Size=UDim2.new(0,120,0,48); action.Position=UDim2.new(1,-128,1,-58); rotateBtn.Size=UDim2.new(0,82,0,42); rotateBtn.Position=UDim2.new(1,-219,1,-56); modeLabel.Size=UDim2.new(.7,0,0,42); modeLabel.Position=UDim2.new(.15,0,1,-108)
+    else panel.Size=UDim2.new(0,360,0,390); panel.Position=UDim2.new(1,-374,0,88); panel.AnchorPoint=Vector2.new(0,0) end
+end
+if workspace.CurrentCamera then workspace.CurrentCamera:GetPropertyChangedSignal(&quot;ViewportSize&quot;):Connect(adapt) end; adapt()
+</ProtectedString>
+        </Properties>
+      </Item>
+    </Item>
+  </Item>
+</roblox>
